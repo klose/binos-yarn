@@ -1,0 +1,2 @@
+binos-yarn requirements:
+1) require $HADOOP_COMMON_HOME, $HADOOP_CONF_DIR in your hadoop cluster environment.

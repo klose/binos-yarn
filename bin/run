@@ -1,0 +1,16 @@
+#!/bin/bash
+export BINOS_YARN_HOME=`cd "$(dirname $0)/.."; pwd`
+export BINOS_YARN_HOME
+if [ ! -f ${BINOS_YARN_HOME}/dist/binos-yarn.jar ]; then
+	ant 	
+fi
+CLASSPATH="${BINOS_YARN_HOME}/dist/binos-yarn.jar:"
+CLASSPATH+=`${HADOOP_COMMON_HOME}/bin/hadoop classpath`
+CLASSPATH+="${BINOS_YARN_HOME}/conf:"
+
+JAVA=java
+if [ -n "$JAVA_HOME" ]; then
+  JAVA="$JAVA_HOME/bin/java"
+fi
+
+$JAVA -cp $CLASSPATH "$@"
