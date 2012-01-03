@@ -106,7 +106,7 @@ public class ApplicationMaster {
       opts.addOption("slave_mem", true, "memory per slave, in MB");
       opts.addOption("slave_cpus", true, "CPUs to use per slave");
       opts.addOption("master_mem", true, "memory for master, in MB");
-      opts.addOption("master port", true, "port for master service (default: 6060)");
+      opts.addOption("master_port", true, "port for master service (default: 6060)");
       opts.addOption("slave_port", true, "port for slave service (default: 6061)");
       
       opts.addOption("class", true, "main class of application");
