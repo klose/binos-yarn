@@ -209,11 +209,12 @@ public class ApplicationMaster {
     } else {
       LOG.info("Shutting down because all containers died");
     }
-    master.destroy();
+    
+    /*master.destroy();
     if (application != null) {
       application.destroy();
     }
-    unregister(succeeded);
+    unregister(succeeded);*/
   }
   
   // Start binos-master and read its URL into binosUrl
@@ -255,14 +256,12 @@ public class ApplicationMaster {
 		}
     	
         BufferedReader in = null;
-        PrintWriter out = null;
         try {
           in  = new BufferedReader(new FileReader(logDirectory + "/binos-master.log"));
           boolean foundUrl = false;
           Pattern pattern = Pattern.compile(".*Master started at (.*)");
           String line = null;
           while ((line = in.readLine()) != null) {
-            out.println(line);
             if (!foundUrl) {
               Matcher m = pattern.matcher(line);
               if (m.matches()) {
@@ -414,6 +413,7 @@ public class ApplicationMaster {
     ctx.setUser(UserGroupInformation.getCurrentUser().getShortUserName());
     List<String> commands = new ArrayList<String> ();
     commands.add(binosHome + "/bin/binos-slave.sh " +
+    		"--port=" + (this.slavePort++) + " " + 
     		"--url=" + masterUrl + " " +
     		"--log_dir=" + this.logDirectory
     		);
