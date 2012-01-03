@@ -120,9 +120,10 @@ public class ApplicationMaster {
       appId.setClusterTimestamp(Long.parseLong(line.getOptionValue("yarn_timestamp")));
       appId.setId(Integer.parseInt(line.getOptionValue("yarn_id")));
       //int failCount = Integer.parseInt(line.getOptionValue("yarn_fail_count"));
-	  appAttemptId = Records.newRecord(ApplicationAttemptId.class);
+      failCount = Integer.parseInt(line.getOptionValue("yarn_fail_count", "1"));  
+      appAttemptId = Records.newRecord(ApplicationAttemptId.class);
       appAttemptId.setApplicationId(appId);
-      appAttemptId.setAttemptId(failCount);
+      appAttemptId.setAttemptId(1);
       LOG.info("Application ID: " + appId + ", fail count: " + failCount);
       
       // Get other command line arguments
@@ -134,7 +135,7 @@ public class ApplicationMaster {
       masterMem = Integer.parseInt(line.getOptionValue("master_mem"));
       masterPort = Integer.parseInt(line.getOptionValue("master_port", "6060"));
       slavePort = Integer.parseInt(line.getOptionValue("slave_port", "6061"));
-      failCount = Integer.parseInt(line.getOptionValue("yarn_fail_count", "1"));     
+        
       programArgs = line.getOptionValue("args", "");
       
       // Set up our configuration and RPC
