@@ -54,7 +54,7 @@ class  BinosYarnClient {
       opts.addOption("slaves", true, "number of slaves");
       opts.addOption("slave_mem", true, "memory per slave, in MB (default: 128)");
       opts.addOption("master_mem", true, "memory for master, in MB (default: 256)");
-      opts.addOption("master port", true, "port for master service (default: 6060)");
+      opts.addOption("master_port", true, "port for master service (default: 6060)");
       opts.addOption("slave_cpus", true, "CPUs to use per slave (default: 1)");
       opts.addOption("slave_port", true, "port for slave service (default: 6061)");
       opts.addOption("log_dir", true, "log directory for Application Master");

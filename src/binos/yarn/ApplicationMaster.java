@@ -416,7 +416,6 @@ public class ApplicationMaster {
     		"--url=" + masterUrl + " " +
     		"--log_dir=" + this.logDirectory
     		);
-    
     ctx.setCommands(commands);
     StartContainerRequest req = Records.newRecord(StartContainerRequest.class);
     req.setContainerLaunchContext(ctx);
