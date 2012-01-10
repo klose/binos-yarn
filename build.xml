@@ -22,7 +22,7 @@
 	<target name="compile" depends="init" 	
 		description="compile the source">
 		<!-- Compile the java code from ${src} into ${classes} -->
-		<javac srcdir="${src}" destdir="${classes}" includeantruntime="on" nowarn="on">
+		<javac srcdir="${src}" destdir="${classes}" includeantruntime="on" nowarn="on" debug="on">
 			<!--compilerarg args="-Xbootclasspath/p:${classpath}:${toString:lib.path.ref}"/-->
 			<classpath>
 				<pathelement path="${classpath}"/>
