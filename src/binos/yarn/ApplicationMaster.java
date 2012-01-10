@@ -155,7 +155,7 @@ public class ApplicationMaster {
 			programArgs = line.getOptionValue("args", "");
 
 			// Set up our configuration and RPC
-			conf = new Configuration();
+			conf = new YarnConfiguration();
 			rpc = YarnRPC.create(conf);
 			
 			
@@ -358,7 +358,7 @@ public class ApplicationMaster {
 		int reqCount = 0;
 		for (NodeId ni: availableNodes) {
 			ResourceRequest request = Records.newRecord(ResourceRequest.class);
-			request.setHostName(ni.getHost());
+			request.setHostName("*");
 			request.setNumContainers(1);
 			Priority pri = Records.newRecord(Priority.class);
 			pri.setPriority(1);
