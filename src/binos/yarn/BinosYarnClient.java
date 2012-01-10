@@ -110,7 +110,7 @@ class  BinosYarnClient {
     				YarnConfiguration.RM_ADDRESS);
     LOG.info("Connecting to ResourceManager at " + rmAddress);
     applicationsManager = 
-      (ClientRMProtocol) rpc.getProxy(ClientRMProtocol.class, rmAddress, new YarnConfiguration(conf));
+      (ClientRMProtocol) rpc.getProxy(ClientRMProtocol.class, rmAddress, conf);
 
     ApplicationId appId = newApplicationId();
     LOG.info("Got application ID " + appId);
@@ -165,7 +165,7 @@ class  BinosYarnClient {
              "-log_dir " + logDirectory + " " +
              "1>" + logDirectory + "/stdout " +
              "2>" + logDirectory + "/stderr"; 
-       
+    System.out.println(command);
     List<String> commands = new ArrayList<String>();
     commands.add(command);
     amContainer.setCommands(commands);

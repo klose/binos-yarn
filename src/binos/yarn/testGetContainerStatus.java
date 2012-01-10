@@ -57,7 +57,7 @@ public class testGetContainerStatus {
 			//StringBuilder info = new StringBuilder();
 			StringBuilder info = new StringBuilder();
 			info.append('\n');
-			for (NodeReport nr: nodesList) {				
+			for (NodeReport nr: nodesList) {
 				info.append("NodeID:");
 				info.append(nr.getNodeId());
 				info.append('\t');

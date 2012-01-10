@@ -7,19 +7,14 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.net.NetUtils;
-import org.apache.hadoop.yarn.api.AMRMProtocol;
 import org.apache.hadoop.yarn.api.ClientRMProtocol;
-import org.apache.hadoop.yarn.api.protocolrecords.GetClusterMetricsRequest;
-import org.apache.hadoop.yarn.api.protocolrecords.GetClusterNodesRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.GetQueueInfoRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.GetQueueInfoResponse;
 import org.apache.hadoop.yarn.api.records.ApplicationReport;
-import org.apache.hadoop.yarn.api.records.NodeReport;
 import org.apache.hadoop.yarn.api.records.QueueInfo;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnRemoteException;
 import org.apache.hadoop.yarn.ipc.YarnRPC;
-import org.apache.hadoop.yarn.server.nodemanager.containermanager.application.Application;
 import org.apache.hadoop.yarn.util.Records;
 
 public class testGetAppsQueueInfo {
@@ -51,6 +46,7 @@ public class testGetAppsQueueInfo {
 		
 			QueueInfo qi = queueRep.getQueueInfo();
 			List<ApplicationReport> appsList = qi.getApplications();
+			LOG.info("Application number:" + appsList.size());
 			for (ApplicationReport ar : appsList) {
 				LOG.info(
 						ar.getApplicationId() + " state:"
@@ -72,7 +68,9 @@ public class testGetAppsQueueInfo {
 			public void run() {
 				// TODO Auto-generated method stub
 				while(true) {
+					LOG.info("before");
 					testStatus.getQueueStatus();
+					LOG.info("after");
 					try {
 						Thread.sleep(5000);
 					} catch (InterruptedException e) {

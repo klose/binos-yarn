@@ -169,8 +169,9 @@ public class ApplicationMaster {
 			initService();
 			
 		} catch (ParseException e) {
-			System.err.println("Failed to parse command line options: "
+			System.out.println("Failed to parse command line options: "
 					+ e.getMessage());
+			e.printStackTrace();
 			System.exit(1);
 		}
 	}
@@ -197,11 +198,11 @@ public class ApplicationMaster {
 		List<ContainerId> noReleases = new ArrayList<ContainerId>();
 		
 		/**apply for containers , and launch the Binos-Slave in the Container.*/
-		while (slavesLaunched < totalSlaves ) {
+		while ( slavesLaunched < totalSlaves ) {
 			AMResponse response;
 			LOG.info("Making resource request for : " + (totalSlaves - slavesLaunched) + " containers.");
 			response = allocate(createRequest(totalSlaves - slavesLaunched), noReleases);
-			
+			LOG.info("allocated containers:" + response.getAllocatedContainers().size());
 			for (Container container : response.getAllocatedContainers()) {
 				// make sure that every container is assigned to launch
 				// binos-slave in different nodes.
@@ -235,6 +236,7 @@ public class ApplicationMaster {
 					// startApplication();
 			}
 		}
+		unregister(true);
 	}
 
 	//}
@@ -357,6 +359,9 @@ public class ApplicationMaster {
 		List<ResourceRequest> resList = new ArrayList<ResourceRequest>();
 		int reqCount = 0;
 		for (NodeId ni: availableNodes) {
+			/*debug*/
+			LOG.debug("createRequest NodeId" + ni.toString());
+			
 			ResourceRequest request = Records.newRecord(ResourceRequest.class);
 			request.setHostName("*");
 			request.setNumContainers(1);
@@ -364,7 +369,7 @@ public class ApplicationMaster {
 			pri.setPriority(1);
 			request.setPriority(pri);
 			Resource capability = Records.newRecord(Resource.class);
-			capability.setMemory(slaveMem);
+			capability.setMemory(20);
 			request.setCapability(capability);
 			resList.add(request);
 			if ( (++reqCount) == total ) {
@@ -460,7 +465,7 @@ public class ApplicationMaster {
 		req.setApplicationAttemptId(appAttemptId);
 		req.addAllAsks(resourceRequest);
 		req.addAllReleases(releases);
-
+		
 		AllocateResponse resp = amrmDelegate.allocate(req);
 
 		return resp.getAMResponse();

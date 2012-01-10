@@ -13,7 +13,7 @@
 	<classpathentry kind="lib" path="/home/jiangbing/Downloads/hadoop-0.23.0/modules/hadoop-yarn-server-web-proxy-0.23.0.jar"/>
 	<classpathentry kind="lib" path="/home/jiangbing/Downloads/hadoop-0.23.0/modules/hadoop-yarn-server-resourcemanager-0.23.0.jar"/>
 	<classpathentry kind="lib" path="/home/jiangbing/Downloads/hadoop-0.23.0/modules/hadoop-yarn-server-nodemanager-0.23.0.jar"/>
-	<classpathentry kind="lib" path="/home/jiangbing/Downloads/hadoop-0.23.0/modules/hadoop-yarn-common-0.23.0.jar"/>
+	<classpathentry kind="lib" path="/home/jiangbing/Downloads/hadoop-0.23.0/modules/hadoop-yarn-common-0.23.0.jar" sourcepath="/HadoopMRV2"/>
 	<classpathentry kind="lib" path="/home/jiangbing/Downloads/hadoop-0.23.0/modules/hadoop-yarn-applications-distributedshell-0.23.0.jar"/>
 	<classpathentry kind="lib" path="/home/jiangbing/Downloads/hadoop-0.23.0/modules/hadoop-mapreduce-client-shuffle-0.23.0.jar"/>
 	<classpathentry kind="lib" path="/home/jiangbing/Downloads/hadoop-0.23.0/modules/hadoop-mapreduce-client-jobclient-0.23.0.jar"/>
