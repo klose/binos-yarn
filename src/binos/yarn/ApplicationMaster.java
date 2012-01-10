@@ -177,14 +177,14 @@ public class ApplicationMaster {
 	
 	private void initService() {
 		ynService = new YarnNodesStatus(this.crmDelegate);
-		//ynService.start();
+		ynService.start();
 	}
 	
 	private void run() throws IOException {
 		
 		LOG.info("Starting application master");
 		LOG.info("Working directory is " + new File(".").getAbsolutePath());
-		ynService.start();
+		//ynService.start();
 		
 		registerWithRM();
 
@@ -197,7 +197,7 @@ public class ApplicationMaster {
 		List<ContainerId> noReleases = new ArrayList<ContainerId>();
 		
 		/**apply for containers , and launch the Binos-Slave in the Container.*/
-		//while (slavesLaunched < totalSlaves ) {
+		while (slavesLaunched < totalSlaves ) {
 			AMResponse response;
 			LOG.info("Making resource request for : " + (totalSlaves - slavesLaunched) + " containers.");
 			response = allocate(createRequest(totalSlaves - slavesLaunched), noReleases);
@@ -235,6 +235,7 @@ public class ApplicationMaster {
 					// startApplication();
 			}
 		}
+	}
 
 	//}
 
