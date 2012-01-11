@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.Arrays;
@@ -34,8 +35,8 @@ import org.apache.hadoop.yarn.api.ContainerManager;
 import org.apache.hadoop.yarn.api.protocolrecords.AllocateRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.AllocateResponse;
 import org.apache.hadoop.yarn.api.protocolrecords.FinishApplicationMasterRequest;
-import org.apache.hadoop.yarn.api.protocolrecords.GetClusterNodesRequest;
 import org.apache.hadoop.yarn.api.protocolrecords.RegisterApplicationMasterRequest;
+import org.apache.hadoop.yarn.api.protocolrecords.RegisterApplicationMasterResponse;
 import org.apache.hadoop.yarn.api.protocolrecords.StartContainerRequest;
 import org.apache.hadoop.yarn.api.records.AMResponse;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
@@ -43,11 +44,11 @@ import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.Container;
 import org.apache.hadoop.yarn.api.records.ContainerId;
 import org.apache.hadoop.yarn.api.records.ContainerLaunchContext;
+import org.apache.hadoop.yarn.api.records.ContainerState;
 import org.apache.hadoop.yarn.api.records.ContainerStatus;
 import org.apache.hadoop.yarn.api.records.ContainerToken;
 import org.apache.hadoop.yarn.api.records.FinalApplicationStatus;
 import org.apache.hadoop.yarn.api.records.NodeId;
-import org.apache.hadoop.yarn.api.records.NodeReport;
 import org.apache.hadoop.yarn.api.records.Priority;
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.api.records.ResourceRequest;
@@ -56,11 +57,22 @@ import org.apache.hadoop.yarn.exceptions.YarnRemoteException;
 import org.apache.hadoop.yarn.ipc.YarnRPC;
 import org.apache.hadoop.yarn.security.ContainerTokenIdentifier;
 import org.apache.hadoop.yarn.util.Records;
-import com.google.common.collect.*;
-
 public class ApplicationMaster {
 	private static final Log LOG = LogFactory.getLog(ApplicationMaster.class);
-
+	
+	 // Counter for completed containers ( complete denotes successful or failed )
+	private AtomicInteger numCompletedContainers = new AtomicInteger();
+	
+	// Allocated container count so that we know how many containers has the RM
+	  // allocated to us
+	private AtomicInteger numAllocatedContainers = new AtomicInteger();
+	
+	// Count of failed containers 
+	private AtomicInteger numFailedContainers = new AtomicInteger();
+	
+	 // Launch threads
+	private List<Thread> launchThreads = new ArrayList<Thread>();	
+	
 	private ApplicationAttemptId appAttemptId;
 	private Configuration conf;
 	private YarnRPC rpc;
@@ -68,7 +80,7 @@ public class ApplicationMaster {
 	private ClientRMProtocol crmDelegate;
 	private YarnNodesStatus ynService;
 	private String binosHome;
-	private int totalSlaves;
+	private int totalSlaves; // System settings and adjust as the Binos-Master's workloads. 
 	private int slaveMem;
 	private int slaveCpus;
 	private int masterMem;
@@ -182,66 +194,181 @@ public class ApplicationMaster {
 	}
 	
 	private void run() throws IOException {
-		
+
 		LOG.info("Starting application master");
 		LOG.info("Working directory is " + new File(".").getAbsolutePath());
-		//ynService.start();
+		// ynService.start();
+
 		
-		registerWithRM();
+		// Register self with ResourceManager 
+	    RegisterApplicationMasterResponse remResp = registerWithRM();
+	    
+	    // Dump out information about cluster capability as seen by the resource manager
+	    int minMem = remResp.getMinimumResourceCapability().getMemory();
+	    int maxMem = remResp.getMaximumResourceCapability().getMemory();
+	    LOG.info("Min mem capabililty of resources in this cluster " + minMem);
+	    LOG.info("Max mem capabililty of resources in this cluster " + maxMem);
+
+	    // A resource ask has to be at least the minimum of the capability of the cluster, the value has to be 
+	    // a multiple of the min value and cannot exceed the max. 
+	    // If it is not an exact multiple of min, the RM will allocate to the nearest multiple of min		
+	    if (slaveMem < minMem) {
+	      LOG.info("Container memory specified below min threshold of cluster. Using min value."
+	          + ", specified=" + slaveMem
+	          + ", min=" + minMem);
+	      slaveMem = minMem; 
+	    } 
+	    else if (slaveMem > maxMem) {
+	      LOG.info("Container memory specified above max threshold of cluster. Using max value."
+	          + ", specified=" + slaveMem
+	          + ", max=" + maxMem);
+	      slaveMem = maxMem;
+	    }
+		
+	    LOG.info("Successfully registered with resource manager");
 
 		startBinosMaster();
 
-		// Start and manage the slaves
-		int slavesLaunched = 0;
-
+		// Record the total number of container RM provide, which contains
+		// containers that AppMaster rejects.
+		int rmResponseContainerNum = 0;
+		AMResponse response;
 		List<ResourceRequest> noRequests = new ArrayList<ResourceRequest>();
 		List<ContainerId> noReleases = new ArrayList<ContainerId>();
-		
-		/**apply for containers , and launch the Binos-Slave in the Container.*/
-		while ( slavesLaunched < totalSlaves ) {
-			AMResponse response;
-			LOG.info("Making resource request for : " + (totalSlaves - slavesLaunched) + " containers.");
-			response = allocate(createRequest(totalSlaves - slavesLaunched), noReleases);
-			LOG.info("allocated containers:" + response.getAllocatedContainers().size());
+
+		/** apply for containers , and launch the Binos-Slave in the Container. */
+		while (numAllocatedContainers.get() < totalSlaves) {
+			
+			LOG.info("Making resource request for : "
+					+ (totalSlaves - numAllocatedContainers.get())
+					+ " containers.");
+			response = allocate(createRequest(totalSlaves
+					- numAllocatedContainers.get()), noReleases);
+			LOG.info("allocated containers:"
+					+ response.getAllocatedContainers().size());
 			for (Container container : response.getAllocatedContainers()) {
 				// make sure that every container is assigned to launch
 				// binos-slave in different nodes.
 				NodeId node = container.getNodeId();
 				LOG.info("Get Container on " + node.getHost());
+				rmResponseContainerNum++;
 				if (!allocatedContainer.keySet().contains(node)) {
-					LOG.info("Launching container on "
-							+ container.getNodeId().getHost());
+					LOG.info("Launching shell command on a new container."
+							+ ", containerId=" + container.getId()
+							+ ", containerNode="
+							+ container.getNodeId().getHost() + ":"
+							+ container.getNodeId().getPort()
+							+ ", containerNodeURI="
+							+ container.getNodeHttpAddress()
+							+ ", containerState" + container.getState()
+							+ ", containerResourceMemory"
+							+ container.getResource().getMemory());
 					launchContainer(container);
+					numAllocatedContainers.addAndGet(1);
 					allocatedContainer.put(node, container);
-					slavesLaunched++;
 				} else {
 					LOG.info("container in Node "
 							+ node.getHost()
 							+ " has allocated for one Slave, waiting for another container.");
 				}
 			}
+			
+			//monitor the status of allocated container
+			monitorAllocatedContainerStatus(response);
+
+			if (numAllocatedContainers.get() == totalSlaves) {
+				LOG.info("All Slaves launched." + ", slave number: "
+						+ totalSlaves + " , responsed container:"
+						+ rmResponseContainerNum + ", accepted container:"
+						+ numCompletedContainers.get());
+			}
+
+			// delay time to apply for container again.
+			// Avoid RM too busy.
+			try {
+				Thread.sleep(1000);
+			} catch (InterruptedException e1) {
+				// TODO Auto-generated catch block
+				e1.printStackTrace();
+			}
+		}
+
+		// monitor the container finish state.
+		while (totalSlaves != numCompletedContainers.get()) {
+			response = allocate(noRequests, noReleases);
+			monitorAllocatedContainerStatus(response);
+			//TODO  get Binos-Master's workload and adjust the number of slaves.
 			try {
 				Thread.sleep(10000);
 			} catch (InterruptedException e1) {
 				// TODO Auto-generated catch block
 				e1.printStackTrace();
 			}
-			if (slavesLaunched == totalSlaves) {
-				LOG.info("All slaves launched");
-				try {
-					Thread.sleep(3000);
-				} catch (InterruptedException e) {
-					
-				}
-					// startApplication();
-			}
-		}
+		}		
+		
+		// TODO loop without exit		
 		unregister(true);
 	}
+	
+	/**
+	 * monitor the status of allocated container
+	 */
+	private void monitorAllocatedContainerStatus(AMResponse response) {
+		// Check what the current available resources in the cluster are
+		// TODO should we do anything if the available resources are not enough?
+		Resource availableResources = response.getAvailableResources();
+		LOG.info("Current available resources in the cluster "
+				+ availableResources);
+		// Check the completed containers
+		List<ContainerStatus> completedContainers = response
+				.getCompletedContainersStatuses();
+		LOG.info("Got response from RM for container ask, completedCnt="
+				+ completedContainers.size());
+		for (ContainerStatus containerStatus : completedContainers) {
+			LOG.info("Got container status for containerID= "
+					+ containerStatus.getContainerId() + ", state="
+					+ containerStatus.getState() + ", exitStatus="
+					+ containerStatus.getExitStatus() + ", diagnostics="
+					+ containerStatus.getDiagnostics());
 
-	//}
+			// non complete containers should not be here
+			assert (containerStatus.getState() == ContainerState.COMPLETE);
 
-	// Start binos-master and read its URL into binosUrl
+			// increment counters for completed/failed containers
+			int exitStatus = containerStatus.getExitStatus();
+			if (0 != exitStatus) {
+				// container failed
+				if (-100 != exitStatus) {
+					// shell script failed
+					// counts as completed
+					numCompletedContainers.incrementAndGet();
+					numFailedContainers.incrementAndGet();
+				} else {
+					// something else bad happened
+					// app job did not complete for some reason
+					// we should re-try as the container was lost for some
+					// reason
+					numAllocatedContainers.decrementAndGet();
+					// we do not need to release the container as it would
+					// be done
+					// by the RM/CM.
+				}
+			} else {
+				// nothing to do
+				// container completed successfully
+				numCompletedContainers.incrementAndGet();
+				LOG.info("Container completed successfully." + ", containerId="
+						+ containerStatus.getContainerId());
+			}
+		}
+
+	}
+
+	/**
+	 * Start binos-master and read its URL.
+	 * 
+	 * @throws IOException
+	 */
 	private void startBinosMaster() throws IOException {
 		String[] command = new String[] { binosHome + "/bin/binos-master.sh",
 				"--port=6060", "--log_dir=" + logDirectory };
@@ -309,17 +436,37 @@ public class ApplicationMaster {
 		// Wait until we've read the URL
 		while (masterUrl == null) {
 			try {
+				System.out.println("Waiting for fetching the Master URL from the output.");
 				masterUrl = urlQueue.take();
 			} catch (InterruptedException e) {
+				
 			}
 		}
 		LOG.info("Binos master started with URL " + masterUrl);
-		try {
-			Thread.sleep(500); // Give binos-master a bit more time to start up
-		} catch (InterruptedException e) {
+		Thread masterStatusUpdater = new Thread(new MasterMonitorRunnable());
+		masterStatusUpdater.start();
+	}
+	
+	/**
+	 * Thread to connect to Binos-Master.
+	 */
+	private class MasterMonitorRunnable implements Runnable {
+
+		@Override
+		public void run() {
+			while (true) {
+				try {
+					Thread.sleep(5000); 
+					//TODO	connect to Master, and get the workload and other args.			
+				} catch (InterruptedException e) {
+					master.destroy();
+				}
+
+			}
+
 		}
 	}
-
+	
 	private ClientRMProtocol connectToCRM() {
 		YarnConfiguration yarnConf = new YarnConfiguration(conf);
 		InetSocketAddress rmAddress = NetUtils.createSocketAddr(this.conf.get(
@@ -343,15 +490,14 @@ public class ApplicationMaster {
 				.getProxy(AMRMProtocol.class, rmAddress, yarnConf));
 	}
 
-	private void registerWithRM() throws YarnRemoteException {
+	private RegisterApplicationMasterResponse registerWithRM() throws YarnRemoteException {
 		RegisterApplicationMasterRequest req = Records
 				.newRecord(RegisterApplicationMasterRequest.class);
 		req.setApplicationAttemptId(appAttemptId);
 		req.setHost("");
 		req.setRpcPort(1);
 		req.setTrackingUrl("");
-		amrmDelegate.registerApplicationMaster(req);
-		LOG.info("Successfully registered with resource manager");
+		return amrmDelegate.registerApplicationMaster(req);
 	}
 
 	private List<ResourceRequest> createRequest(int total) {
@@ -369,7 +515,7 @@ public class ApplicationMaster {
 			pri.setPriority(1);
 			request.setPriority(pri);
 			Resource capability = Records.newRecord(Resource.class);
-			capability.setMemory(20);
+			capability.setMemory(slaveMem);
 			request.setCapability(capability);
 			resList.add(request);
 			if ( (++reqCount) == total ) {
@@ -407,55 +553,14 @@ public class ApplicationMaster {
 	 * @throws IOException
 	 */
 	private void launchContainer(Container container) throws IOException {
-		ContainerManager mgr = connectToCM(container);
-		ContainerLaunchContext ctx = Records
-				.newRecord(ContainerLaunchContext.class);
-		ctx.setContainerId(container.getId());
-		ctx.setResource(container.getResource());
-		ctx.setUser(UserGroupInformation.getCurrentUser().getShortUserName());
-		List<String> commands = new ArrayList<String>();
-		commands.add(binosHome + "/bin/binos-slave.sh " + "--port="
-				+ (this.slavePort++) + " " + "--url=" + masterUrl + " "
-				+ "--log_dir=" + this.logDirectory);
-		ctx.setCommands(commands);
-		StartContainerRequest req = Records
-				.newRecord(StartContainerRequest.class);
-		req.setContainerLaunchContext(ctx);
-		mgr.startContainer(req);
-	}
+		 LaunchContainerRunnable runnableLaunchContainer = new LaunchContainerRunnable(container);
+	     Thread launchThread = new Thread(runnableLaunchContainer);	
 
-	private ContainerManager connectToCM(Container container)
-			throws IOException {
-		// Based on similar code in the ContainerLauncher in Hadoop MapReduce
-		ContainerToken contToken = container.getContainerToken();
-		final String address = container.getNodeId().getHost() + ":"
-				+ container.getNodeId().getPort();
-		LOG.info("Connecting to ContainerManager at " + address);
-		UserGroupInformation user = UserGroupInformation.getCurrentUser();
-		if (UserGroupInformation.isSecurityEnabled()) {
-			if (!ugiMap.containsKey(address)) {
-				Token<ContainerTokenIdentifier> hadoopToken = new Token<ContainerTokenIdentifier>(
-						contToken.getIdentifier().array(), contToken
-								.getPassword().array(), new Text(
-								contToken.getKind()), new Text(
-								contToken.getService()));
-				user = UserGroupInformation.createRemoteUser(address);
-				user.addToken(hadoopToken);
-				ugiMap.put(address, user);
-			} else {
-				user = ugiMap.get(address);
-			}
-		}
-		ContainerManager mgr = user
-				.doAs(new PrivilegedAction<ContainerManager>() {
-					public ContainerManager run() {
-						YarnRPC rpc = YarnRPC.create(conf);
-						return (ContainerManager) rpc.getProxy(
-								ContainerManager.class,
-								NetUtils.createSocketAddr(address), conf);
-					}
-				});
-		return mgr;
+	     // launch and start the container on a separate thread to keep the main thread unblocked
+	     // as all containers may not be allocated at one go.
+	     launchThreads.add(launchThread);
+	     launchThread.start();
+		
 	}
 
 	private AMResponse allocate(List<ResourceRequest> resourceRequest,
@@ -464,10 +569,8 @@ public class ApplicationMaster {
 		req.setResponseId(++requestId);
 		req.setApplicationAttemptId(appAttemptId);
 		req.addAllAsks(resourceRequest);
-		req.addAllReleases(releases);
-		
+		req.addAllReleases(releases);		
 		AllocateResponse resp = amrmDelegate.allocate(req);
-
 		return resp.getAMResponse();
 	}
 
@@ -481,4 +584,133 @@ public class ApplicationMaster {
 		// req.setFinalState(succeeded ? "SUCCEEDED" : "FAILED");
 		amrmDelegate.finishApplicationMaster(req);
 	}
+	
+	  /**
+	   * Thread to connect to the  ContainerManager and 
+	   * launch the container that will execute the shell command. 
+	   */
+	 private class LaunchContainerRunnable implements Runnable {
+
+	    // Allocated container 
+	    Container container;
+	    // Handle to communicate with ContainerManager
+	    ContainerManager cm;
+
+	    /**
+	     * @param lcontainer Allocated container
+	     */
+	    public LaunchContainerRunnable(Container lcontainer) {
+	      this.container = lcontainer;
+	    }
+	    
+	    /*
+	     * connect to ContainerManager
+	     */
+	    private ContainerManager connectToCM(Container container)
+				throws IOException {
+			// Based on similar code in the ContainerLauncher in Hadoop MapReduce
+			ContainerToken contToken = container.getContainerToken();
+			final String address = container.getNodeId().getHost() + ":"
+					+ container.getNodeId().getPort();
+			LOG.info("Connecting to ContainerManager at " + address);
+			UserGroupInformation user = UserGroupInformation.getCurrentUser();
+			if (UserGroupInformation.isSecurityEnabled()) {
+				if (!ugiMap.containsKey(address)) {
+					Token<ContainerTokenIdentifier> hadoopToken = new Token<ContainerTokenIdentifier>(
+							contToken.getIdentifier().array(), contToken
+									.getPassword().array(), new Text(
+									contToken.getKind()), new Text(
+									contToken.getService()));
+					user = UserGroupInformation.createRemoteUser(address);
+					user.addToken(hadoopToken);
+					ugiMap.put(address, user);
+				} else {
+					user = ugiMap.get(address);
+				}
+			}
+			ContainerManager mgr = user
+					.doAs(new PrivilegedAction<ContainerManager>() {
+						public ContainerManager run() {
+							YarnRPC rpc = YarnRPC.create(conf);
+							return (ContainerManager) rpc.getProxy(
+									ContainerManager.class,
+									NetUtils.createSocketAddr(address), conf);
+						}
+					});
+			return mgr;
+		}
+
+	    @Override
+	    /**
+	     * Connects to CM, sets up container launch context 
+	     * for shell command and eventually dispatches the container 
+	     * start request to the CM. 
+	     */
+		public void run() {
+			// Connect to ContainerManager
+			LOG.info("Connecting to container manager for containerid="
+					+ container.getId());
+			try {
+				this.cm = connectToCM(this.container);
+			} catch (IOException e1) {
+				// TODO Auto-generated catch block
+				e1.printStackTrace();
+			}
+
+			LOG.info("Setting up container launch container for containerid="
+					+ container.getId());
+			ContainerLaunchContext ctx = Records
+					.newRecord(ContainerLaunchContext.class);
+
+			ctx.setContainerId(container.getId());
+			ctx.setResource(container.getResource());
+
+			try {
+				ctx.setUser(UserGroupInformation.getCurrentUser()
+						.getShortUserName());
+			} catch (IOException e) {
+				LOG.info("Getting current user info failed when trying to launch the container"
+						+ e.getMessage());
+			}
+
+			// Set the environment
+			ctx.setEnvironment(System.getenv());
+
+			List<String> commands = new ArrayList<String>();
+			commands.add(binosHome + "/bin/binos-slave.sh " + "--port="
+					+ (slavePort++) + " " + "--url=" + masterUrl + " "
+					+ "--log_dir=" + logDirectory);
+			ctx.setCommands(commands);
+			StartContainerRequest startReq = Records
+					.newRecord(StartContainerRequest.class);
+			startReq.setContainerLaunchContext(ctx);
+			try {
+				cm.startContainer(startReq);
+			} catch (YarnRemoteException e) {
+				LOG.info("Start container failed for :" + ", containerId="
+						+ container.getId());
+				e.printStackTrace();
+				// TODO do we need to release this container?
+			}
+
+			// Get container status?
+			// Left commented out as the shell scripts are short lived
+			// and we are relying on the status for completed containers from RM
+			// to detect status
+
+			// GetContainerStatusRequest statusReq =
+			// Records.newRecord(GetContainerStatusRequest.class);
+			// statusReq.setContainerId(container.getId());
+			// GetContainerStatusResponse statusResp;
+			// try {
+			// statusResp = cm.getContainerStatus(statusReq);
+			// LOG.info("Container Status"
+			// + ", id=" + container.getId()
+			// + ", status=" +statusResp.getStatus());
+			// } catch (YarnRemoteException e) {
+			// e.printStackTrace();
+			// }
+		}
+	}
+	
 }

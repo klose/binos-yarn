@@ -52,7 +52,7 @@ class  BinosYarnClient {
       Options opts = new Options();
       opts.addOption("binos_home", true, "directory where Binos is installed");
       opts.addOption("slaves", true, "number of slaves");
-      opts.addOption("slave_mem", true, "memory per slave, in MB (default: 128)");
+      opts.addOption("slave_mem", true, "memory per slave, in MB (default: 32)");
       opts.addOption("master_mem", true, "memory for master, in MB (default: 256)");
       opts.addOption("master_port", true, "port for master service (default: 6060)");
       opts.addOption("slave_cpus", true, "CPUs to use per slave (default: 1)");
@@ -81,7 +81,7 @@ class  BinosYarnClient {
             "option or through the environment");
     	  System.exit(1);
       }
-      slaveMem = Integer.parseInt(line.getOptionValue("slave_mem", "128"));
+      slaveMem = Integer.parseInt(line.getOptionValue("slave_mem", "32"));
       slaveCpus = Integer.parseInt(line.getOptionValue("slave_cpus", "1"));
       masterMem = Integer.parseInt(line.getOptionValue("master_mem", "256"));
       masterPort = Integer.parseInt(line.getOptionValue("master_port", "6060"));
