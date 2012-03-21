@@ -7,6 +7,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
@@ -91,7 +92,8 @@ public class ApplicationMaster {
 	// private String mainClass;
 	private String programArgs;
 	// private URI jarUri;
-
+	private String masterHostName;
+	
 	private Process master;
 	private String masterUrl;
 	private Process application;
@@ -252,24 +254,26 @@ public class ApplicationMaster {
 				NodeId node = container.getNodeId();
 				LOG.info("Get Container on " + node.getHost());
 				rmResponseContainerNum++;
-				if (!allocatedContainer.keySet().contains(node)) {
-					LOG.info("Launching shell command on a new container."
-							+ ", containerId=" + container.getId()
-							+ ", containerNode="
-							+ container.getNodeId().getHost() + ":"
-							+ container.getNodeId().getPort()
-							+ ", containerNodeURI="
-							+ container.getNodeHttpAddress()
-							+ ", containerState" + container.getState()
-							+ ", containerResourceMemory"
-							+ container.getResource().getMemory());
-					launchContainer(container);
-					numAllocatedContainers.addAndGet(1);
-					allocatedContainer.put(node, container);
-				} else {
-					LOG.info("container in Node "
-							+ node.getHost()
-							+ " has allocated for one Slave, waiting for another container.");
+				if (!node.getHost().equals(masterHostName)) {
+					if (!allocatedContainer.keySet().contains(node)) {
+						LOG.info("Launching shell command on a new container."
+								+ ", containerId=" + container.getId()
+								+ ", containerNode="
+								+ container.getNodeId().getHost() + ":"
+								+ container.getNodeId().getPort()
+								+ ", containerNodeURI="
+								+ container.getNodeHttpAddress()
+								+ ", containerState" + container.getState()
+								+ ", containerResourceMemory"
+								+ container.getResource().getMemory());
+						launchContainer(container);
+						numAllocatedContainers.addAndGet(1);
+						allocatedContainer.put(node, container);
+					} else {
+						LOG.info("container in Node "
+								+ node.getHost()
+								+ " has allocated for one Slave, waiting for another container.");
+					}
 				}
 			}
 			
@@ -438,6 +442,8 @@ public class ApplicationMaster {
 			try {
 				System.out.println("Waiting for fetching the Master URL from the output.");
 				masterUrl = urlQueue.take();
+				masterHostName = InetAddress.getLocalHost().getHostName();
+				
 			} catch (InterruptedException e) {
 				
 			}
@@ -693,23 +699,6 @@ public class ApplicationMaster {
 				// TODO do we need to release this container?
 			}
 
-			// Get container status?
-			// Left commented out as the shell scripts are short lived
-			// and we are relying on the status for completed containers from RM
-			// to detect status
-
-			// GetContainerStatusRequest statusReq =
-			// Records.newRecord(GetContainerStatusRequest.class);
-			// statusReq.setContainerId(container.getId());
-			// GetContainerStatusResponse statusResp;
-			// try {
-			// statusResp = cm.getContainerStatus(statusReq);
-			// LOG.info("Container Status"
-			// + ", id=" + container.getId()
-			// + ", status=" +statusResp.getStatus());
-			// } catch (YarnRemoteException e) {
-			// e.printStackTrace();
-			// }
 		}
 	}
 	

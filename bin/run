@@ -5,9 +5,9 @@ if [ ! -f ${BINOS_YARN_HOME}/dist/binos-yarn.jar ]; then
 	ant 	
 fi
 CLASSPATH="${BINOS_YARN_HOME}/dist/binos-yarn.jar:"
-CLASSPATH+=`${HADOOP_COMMON_HOME}/bin/hadoop classpath`
+CLASSPATH+=`${YARN_HOME}/bin/hadoop classpath`":"
 CLASSPATH+="${BINOS_YARN_HOME}/conf:"
-
+CLASSPATH+=${YARN_CONF_DIR}":"
 JAVA=java
 if [ -n "$JAVA_HOME" ]; then
   JAVA="$JAVA_HOME/bin/java"
