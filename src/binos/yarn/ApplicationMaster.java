@@ -74,20 +74,29 @@ public class ApplicationMaster {
 	 // Launch threads
 	private List<Thread> launchThreads = new ArrayList<Thread>();	
 	
+	/**
+	 * if the request amount is below this number, it will not trigger adjust.
+	 */
+	private static int adjustTolerantRatio = 5;
+	private static int adjustFactor = 1;
+	private static int adjustCount = 0; //means system adjust count.
+	
 	private ApplicationAttemptId appAttemptId;
 	private Configuration conf;
 	private YarnRPC rpc;
 	private AMRMProtocol amrmDelegate;
 	private ClientRMProtocol crmDelegate;
 	private YarnNodesStatus ynService;
+	private BinosNodesUpdater bnService;
 	private String binosHome;
-	private int totalSlaves; // System settings and adjust as the Binos-Master's workloads. 
+	private AtomicInteger totalSlaves = new AtomicInteger(); // System settings and adjust as the Binos-Master's workloads. 
 	private int slaveMem;
 	private int slaveCpus;
 	private int masterMem;
 	private int masterPort;
 	private int slavePort;
 	private int failCount;
+	private int rpcServicePort;
 	private String logDirectory;
 	// private String mainClass;
 	private String programArgs;
@@ -102,8 +111,13 @@ public class ApplicationMaster {
 
 	private int requestId = 0; // For giving unique IDs to YARN resource
 								// requests
-
-	// Have a cache of UGIs on different nodes to avoid creating too many RPC
+	/*
+	 *  Record the total number of container RM provide, which contains
+	 *  containers that AppMaster rejects.
+	 */
+	 private int rmResponseContainerNum = 0;
+	
+	 // Have a cache of UGIs on different nodes to avoid creating too many RPC
 	// client connection objects to the same NodeManager
 	private Map<String, UserGroupInformation> ugiMap = new HashMap<String, UserGroupInformation>();
 
@@ -130,6 +144,7 @@ public class ApplicationMaster {
 					"port for master service (default: 6060)");
 			opts.addOption("slave_port", true,
 					"port for slave service (default: 6061)");
+			opts.addOption("rpc_service_port", true, "port to listening Binos-Server info, (dafault: 50001)"); 
 
 			opts.addOption("class", true, "main class of application");
 			opts.addOption("args", true,
@@ -157,12 +172,14 @@ public class ApplicationMaster {
 			binosHome = line.getOptionValue("binos_home",
 					System.getenv("BINOS_HOME"));
 			logDirectory = line.getOptionValue("log_dir");
-			totalSlaves = Integer.parseInt(line.getOptionValue("slaves"));
+			totalSlaves.set(Integer.parseInt(line.getOptionValue("slaves")));
 			slaveMem = Integer.parseInt(line.getOptionValue("slave_mem"));
 			slaveCpus = Integer.parseInt(line.getOptionValue("slave_cpus"));
 			masterMem = Integer.parseInt(line.getOptionValue("master_mem"));
 			masterPort = Integer.parseInt(line.getOptionValue("master_port",
 					"6060"));
+			rpcServicePort = Integer.parseInt(line.getOptionValue("rpc_service_port", 
+					"50001"));
 			slavePort = Integer.parseInt(line.getOptionValue("slave_port",
 					"6061"));
 
@@ -192,10 +209,12 @@ public class ApplicationMaster {
 	
 	private void initService() {
 		ynService = new YarnNodesStatus(this.crmDelegate);
-		ynService.start();
+		ynService.initService();
+		bnService = new BinosNodesUpdater(this.rpcServicePort);
+		bnService.initService();
 	}
 	
-	private void run() throws IOException {
+	private void run() throws IOException  {
 
 		LOG.info("Starting application master");
 		LOG.info("Working directory is " + new File(".").getAbsolutePath());
@@ -231,56 +250,25 @@ public class ApplicationMaster {
 
 		startBinosMaster();
 
-		// Record the total number of container RM provide, which contains
-		// containers that AppMaster rejects.
-		int rmResponseContainerNum = 0;
+
 		AMResponse response;
 		List<ResourceRequest> noRequests = new ArrayList<ResourceRequest>();
 		List<ContainerId> noReleases = new ArrayList<ContainerId>();
 
 		/** apply for containers , and launch the Binos-Slave in the Container. */
-		while (numAllocatedContainers.get() < totalSlaves) {
+		while (numAllocatedContainers.get() < totalSlaves.get()) {
 			
 			LOG.info("Making resource request for : "
-					+ (totalSlaves - numAllocatedContainers.get())
+					+ (totalSlaves.get() - numAllocatedContainers.get())
 					+ " containers.");
-			response = allocate(createRequest(totalSlaves
+			response = allocate(createRequest(totalSlaves.get()
 					- numAllocatedContainers.get()), noReleases);
-			LOG.info("allocated containers:"
-					+ response.getAllocatedContainers().size());
-			for (Container container : response.getAllocatedContainers()) {
-				// make sure that every container is assigned to launch
-				// binos-slave in different nodes.
-				NodeId node = container.getNodeId();
-				LOG.info("Get Container on " + node.getHost());
-				rmResponseContainerNum++;
-				if (!node.getHost().equals(masterHostName)) {
-					if (!allocatedContainer.keySet().contains(node)) {
-						LOG.info("Launching shell command on a new container."
-								+ ", containerId=" + container.getId()
-								+ ", containerNode="
-								+ container.getNodeId().getHost() + ":"
-								+ container.getNodeId().getPort()
-								+ ", containerNodeURI="
-								+ container.getNodeHttpAddress()
-								+ ", containerState" + container.getState()
-								+ ", containerResourceMemory"
-								+ container.getResource().getMemory());
-						launchContainer(container);
-						numAllocatedContainers.addAndGet(1);
-						allocatedContainer.put(node, container);
-					} else {
-						LOG.info("container in Node "
-								+ node.getHost()
-								+ " has allocated for one Slave, waiting for another container.");
-					}
-				}
-			}
+			containerMatchSlaveTry(response);
 			
 			//monitor the status of allocated container
 			monitorAllocatedContainerStatus(response);
 
-			if (numAllocatedContainers.get() == totalSlaves) {
+			if (numAllocatedContainers.get() == totalSlaves.get()) {
 				LOG.info("All Slaves launched." + ", slave number: "
 						+ totalSlaves + " , responsed container:"
 						+ rmResponseContainerNum + ", accepted container:"
@@ -298,22 +286,80 @@ public class ApplicationMaster {
 		}
 
 		// monitor the container finish state.
-		while (totalSlaves != numCompletedContainers.get()) {
-			response = allocate(noRequests, noReleases);
-			monitorAllocatedContainerStatus(response);
-			//TODO  get Binos-Master's workload and adjust the number of slaves.
+		while (true) {
+			//  get Binos-Master's workload and scale-out the number of slaves.
+			if (this.bnService.getRequestAmount() >=  this.adjustTolerantRatio) {
+				totalSlaves.addAndGet(adjustFactor);
+				adjustCount++;
+				adjustTolerantArgs();
+				this.bnService.feedback();
+				response = allocate(createRequest(totalSlaves.get()
+						- numAllocatedContainers.get()), noReleases);
+				containerMatchSlaveTry(response);
+				monitorAllocatedContainerStatus(response);
+			}
+			//TODO  get Binos-Master's workload and scale-in the number of slaves.
 			try {
 				Thread.sleep(10000);
 			} catch (InterruptedException e1) {
 				// TODO Auto-generated catch block
 				e1.printStackTrace();
+			}finally {
+				// TODO loop without exit		
+				unregister(true);
 			}
 		}		
 		
-		// TODO loop without exit		
-		unregister(true);
+		
 	}
 	
+	/**
+	 * control the speed of adjust slave.
+	 */
+	private void adjustTolerantArgs() {
+		// TODO Auto-generated method stub
+		if (adjustCount > 1) {
+			adjustTolerantRatio = adjustCount * adjustTolerantRatio;
+		}
+	}
+	/**
+	 * try to match container with slave. 
+	 * 
+	 * @param response
+	 * @throws IOException 
+	 */
+	private void containerMatchSlaveTry(AMResponse response) throws IOException {
+		LOG.info("allocated containers:"
+				+ response.getAllocatedContainers().size());
+		for (Container container : response.getAllocatedContainers()) {
+			// make sure that every container is assigned to launch
+			// binos-slave in different nodes.
+			NodeId node = container.getNodeId();
+			LOG.info("Get Container on " + node.getHost());
+			rmResponseContainerNum++;
+			if (!node.getHost().equals(masterHostName)) {
+				if (!allocatedContainer.keySet().contains(node)) {
+					LOG.info("Launching shell command on a new container."
+							+ ", containerId=" + container.getId()
+							+ ", containerNode="
+							+ container.getNodeId().getHost() + ":"
+							+ container.getNodeId().getPort()
+							+ ", containerNodeURI="
+							+ container.getNodeHttpAddress()
+							+ ", containerState" + container.getState()
+							+ ", containerResourceMemory"
+							+ container.getResource().getMemory());
+					launchContainer(container);
+					numAllocatedContainers.addAndGet(1);
+					allocatedContainer.put(node, container);
+				} else {
+					LOG.info("container in Node "
+							+ node.getHost()
+							+ " has allocated for one Slave, waiting for another container.");
+				}
+			}
+		}
+	}
 	/**
 	 * monitor the status of allocated container
 	 */

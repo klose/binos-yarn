@@ -21,5 +21,7 @@
 	<classpathentry kind="lib" path="/home/jiangbing/Downloads/hadoop-0.23.0/modules/hadoop-mapreduce-client-core-0.23.0.jar"/>
 	<classpathentry kind="lib" path="/home/jiangbing/Downloads/hadoop-0.23.0/modules/hadoop-mapreduce-client-common-0.23.0.jar"/>
 	<classpathentry kind="lib" path="/home/jiangbing/Downloads/hadoop-0.23.0/modules/hadoop-mapreduce-client-app-0.23.0.jar"/>
+	<classpathentry kind="lib" path="/home/jiangbing/JLoop/protobuf-socket-rpc-read-only-2.0/java/target/protobuf_socketrpc-2.0.0-DIY.jar"/>
+	<classpathentry kind="lib" path="/home/jiangbing/JLoop/protobuf-2.4.1/java/target/protobuf-java-2.4.1.jar"/>
 	<classpathentry kind="output" path="classes"/>
 </classpath>

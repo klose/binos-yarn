@@ -27,7 +27,9 @@ public class YarnNodesStatus extends Thread{
 	YarnNodesStatus(ClientRMProtocol delegate) {
 		this.crmDelegate  = delegate;
 	}
-
+	public void initService() {
+		this.start();
+	}
 	@Override
 	public void run() {
 		// TODO Auto-generated method stub
